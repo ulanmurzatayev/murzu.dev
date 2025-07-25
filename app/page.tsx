@@ -1,8 +1,19 @@
+import Image from "next/image";
+
 export default function Home() {
   return (
     <div className="min-h-screen flex items-center justify-center p-8">
       <main className="max-w-2xl mx-auto text-center space-y-8">
         <div className="space-y-4">
+          <div className="flex justify-center mb-8">
+            <Image
+              src="/profile.jpg"
+              alt="Ulan Murzatayev"
+              width={180}
+              height={180}
+              className="rounded-full object-cover object-center"
+            />
+          </div>
           <h1 className="text-4xl md:text-6xl font-light tracking-tight">
             Ulan Murzatayev
           </h1>
