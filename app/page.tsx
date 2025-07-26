@@ -1,9 +1,11 @@
 import Image from "next/image";
+import BackgroundPaths from "./components/BackgroundPaths";
 
 export default function Home() {
   return (
-    <div className="min-h-screen flex items-center justify-center p-8">
-      <main className="max-w-2xl mx-auto text-center space-y-8">
+    <div className="min-h-screen flex items-center justify-center p-8 relative">
+      <BackgroundPaths />
+      <main className="max-w-2xl mx-auto text-center space-y-8 relative z-10">
         <div className="space-y-4">
           <div className="flex justify-center mb-8">
             <Image
