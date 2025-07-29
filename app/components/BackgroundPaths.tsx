@@ -119,7 +119,7 @@ function drawSmoothCurve(ctx: CanvasRenderingContext2D, points: Point[]) {
 
 const CanvasWaves = memo(function CanvasWaves() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationIdRef = useRef<number>();
+  const animationIdRef = useRef<number | null>(null);
   const dimensionsRef = useRef({ width: 0, height: 0 });
 
   useEffect(() => {
