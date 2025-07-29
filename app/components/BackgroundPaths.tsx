@@ -1,305 +1,223 @@
 "use client";
 
 /**
- * Adapted from KokonutUI background-paths component
- * @author: @dorian_baffier (original), adapted for Tailwind v4
- * @description: Background Paths with hydration-safe implementation
- * @version: 1.0.0 (adapted)
+ * Canvas-based ripple wave background
+ * @description: High-performance canvas implementation of rippling wave paths
+ * @version: 2.0.0 (canvas-based)
  * @license: MIT
- * @website: https://kokonutui.com
  */
 
-import { memo, useMemo, useEffect, useState } from "react";
+import { memo, useEffect, useRef } from "react";
 
 interface Point {
   x: number;
   y: number;
 }
 
-interface PathData {
-  id: string;
-  d: string;
+interface WaveLayer {
+  count: number;
+  baseAmplitude: number;
+  rippleSpeed: number;
   opacity: number;
-  width: number;
+  strokeWidth: number;
+  color: string;
 }
 
-// Fixed precision math functions to ensure identical server/client results
-function fixedSin(x: number): number {
-  return Math.round(Math.sin(x) * 1000000) / 1000000;
-}
+// Wave layers configuration
+const waveLayers: WaveLayer[] = [
+  {
+    count: 8,
+    baseAmplitude: 80,
+    rippleSpeed: 0.8,
+    opacity: 0.3,
+    strokeWidth: 3,
+    color: '#9333ea' // purple
+  },
+  {
+    count: 10,
+    baseAmplitude: 60,
+    rippleSpeed: 1.2,
+    opacity: 0.25,
+    strokeWidth: 2.5,
+    color: '#3b82f6' // blue
+  },
+  {
+    count: 6,
+    baseAmplitude: 40,
+    rippleSpeed: 1.6,
+    opacity: 0.2,
+    strokeWidth: 2,
+    color: '#10b981' // emerald
+  }
+];
 
-function fixedCos(x: number): number {
-  return Math.round(Math.cos(x) * 1000000) / 1000000;
-}
-
-function generateAestheticPath(
+function generateWavePoints(
   index: number,
-  position: number,
-  type: "primary" | "secondary" | "accent",
-  time: number = 0
-): string {
-  const baseAmplitude = type === "primary" ? 150 : type === "secondary" ? 100 : 60;
+  layer: WaveLayer,
+  time: number,
+  canvasWidth: number,
+  canvasHeight: number
+): Point[] {
   const phase = index * 0.2;
-  const rippleSpeed = type === "primary" ? 0.8 : type === "secondary" ? 1.2 : 1.6;
   const points: Point[] = [];
-  const segments = type === "primary" ? 10 : type === "secondary" ? 8 : 6;
-
-  const startX = 2400;
-  const startY = 800;
-  const endX = -2400;
-  const endY = -800 + index * 25;
+  const segments = layer.count === 8 ? 10 : layer.count === 10 ? 8 : 6;
+  
+  // Fixed wave parameters - independent of screen size
+  const fixedSpacing = 25; // Fixed pixel spacing between waves
+  const baseViewportWidth = 1200; // Reference viewport width
+  const baseViewportHeight = 800; // Reference viewport height
+  
+  // Create infinite background effect - waves extend beyond screen bounds
+  const startX = -baseViewportWidth * 0.3;
+  const startY = baseViewportHeight * 0.2;
+  const endX = Math.max(canvasWidth * 1.3, baseViewportWidth * 1.3);
+  const endY = Math.max(canvasHeight * 1.1, baseViewportHeight * 0.9) + index * fixedSpacing;
 
   for (let i = 0; i <= segments; i++) {
     const progress = i / segments;
-    const eased = 1 - (1 - progress) ** 2;
-
+    const eased = 1 - (1 - progress) ** 2; // Original easing curve
+    
     const baseX = startX + (endX - startX) * eased;
     const baseY = startY + (endY - startY) * eased;
-
+    
     const amplitudeFactor = 1 - eased * 0.3;
-    const ripplePhase = time * rippleSpeed + progress * Math.PI * 2;
-    const wave1 = fixedSin(progress * Math.PI * 3 + phase + ripplePhase * 0.5) * (baseAmplitude * 0.7 * amplitudeFactor);
-    const wave2 = fixedCos(progress * Math.PI * 4 + phase + ripplePhase * 0.3) * (baseAmplitude * 0.3 * amplitudeFactor);
-    const wave3 = fixedSin(progress * Math.PI * 2 + phase + ripplePhase * 0.7) * (baseAmplitude * 0.2 * amplitudeFactor);
+    const ripplePhase = time * layer.rippleSpeed + progress * Math.PI * 2;
+    
+    // Fixed amplitude - same across all screen sizes
+    const wave1 = Math.sin(progress * Math.PI * 3 + phase + ripplePhase * 0.5) * (layer.baseAmplitude * 0.7 * amplitudeFactor);
+    const wave2 = Math.cos(progress * Math.PI * 4 + phase + ripplePhase * 0.3) * (layer.baseAmplitude * 0.3 * amplitudeFactor);
+    const wave3 = Math.sin(progress * Math.PI * 2 + phase + ripplePhase * 0.7) * (layer.baseAmplitude * 0.2 * amplitudeFactor);
 
     points.push({
-      x: Math.round((baseX * position) * 1000) / 1000,
-      y: Math.round((baseY + wave1 + wave2 + wave3) * 1000) / 1000,
+      x: baseX,
+      y: baseY + wave1 + wave2 + wave3,
     });
   }
 
-  const pathCommands = points.map((point: Point, i: number) => {
-    if (i === 0) return `M ${point.x} ${point.y}`;
-    const prevPoint = points[i - 1];
-    const tension = 0.4;
-    const cp1x = Math.round((prevPoint.x + (point.x - prevPoint.x) * tension) * 1000) / 1000;
-    const cp1y = Math.round(prevPoint.y * 1000) / 1000;
-    const cp2x = Math.round((prevPoint.x + (point.x - prevPoint.x) * (1 - tension)) * 1000) / 1000;
-    const cp2y = Math.round(point.y * 1000) / 1000;
-    return `C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${point.x} ${point.y}`;
-  });
-
-  return pathCommands.join(" ");
+  return points;
 }
 
-// Use deterministic IDs to avoid hydration issues
-const generateDeterministicId = (prefix: string, index: number): string =>
-  `${prefix}-${index}`;
+function drawSmoothCurve(ctx: CanvasRenderingContext2D, points: Point[]) {
+  if (points.length < 2) return;
+  
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  
+  for (let i = 1; i < points.length; i++) {
+    const prevPoint = points[i - 1];
+    const currentPoint = points[i];
+    const tension = 0.4;
+    
+    const cp1x = prevPoint.x + (currentPoint.x - prevPoint.x) * tension;
+    const cp1y = prevPoint.y;
+    const cp2x = prevPoint.x + (currentPoint.x - prevPoint.x) * (1 - tension);
+    const cp2y = currentPoint.y;
+    
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, currentPoint.x, currentPoint.y);
+  }
+}
 
-const FloatingPaths = memo(function FloatingPaths({
-  position,
-}: {
-  position: number;
-}) {
-  const [time, setTime] = useState(0);
+const CanvasWaves = memo(function CanvasWaves() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animationIdRef = useRef<number>();
+  const dimensionsRef = useRef({ width: 0, height: 0 });
 
   useEffect(() => {
-    const startTime = Date.now();
-    const animate = () => {
-      setTime((Date.now() - startTime) * 0.001);
-      requestAnimationFrame(animate);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const updateCanvasSize = () => {
+      const container = canvas.parentElement;
+      if (!container) return;
+      
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      const dpr = window.devicePixelRatio || 1;
+      
+      // Update canvas size
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      canvas.style.width = width + 'px';
+      canvas.style.height = height + 'px';
+      
+      // Scale context for DPR
+      ctx.scale(dpr, dpr);
+      
+      // Update dimensions reference
+      dimensionsRef.current = { width, height };
     };
-    const animationId = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(animationId);
+
+    updateCanvasSize();
+
+    const handleResize = () => {
+      updateCanvasSize();
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    const startTime = Date.now();
+    
+    const animate = () => {
+      const time = (Date.now() - startTime) * 0.001;
+      const { width, height } = dimensionsRef.current;
+      
+      // Clear canvas
+      ctx.clearRect(0, 0, width, height);
+      
+      // Draw wave layers - consistent across all screen sizes
+      waveLayers.forEach((layer, layerIndex) => {
+        for (let i = 0; i < layer.count; i++) {
+          const points = generateWavePoints(i, layer, time, width, height);
+          
+          if (points.length > 1) {
+            ctx.save();
+            
+            // Fixed stroke style - same proportions on all screens
+            ctx.globalAlpha = Math.min(1, layer.opacity + (i * 0.01));
+            ctx.strokeStyle = layer.color;
+            ctx.lineWidth = layer.strokeWidth + (i * 0.2);
+            ctx.lineCap = 'round';
+            
+            drawSmoothCurve(ctx, points);
+            ctx.stroke();
+            
+            ctx.restore();
+          }
+        }
+      });
+      
+      animationIdRef.current = requestAnimationFrame(animate);
+    };
+
+    animate();
+
+    return () => {
+      if (animationIdRef.current) {
+        cancelAnimationFrame(animationIdRef.current);
+      }
+      window.removeEventListener('resize', handleResize);
+    };
   }, []);
-  // Match original path counts: 12 primary, 15 secondary, 10 accent
-  const primaryPaths: PathData[] = useMemo(
-    () =>
-      Array.from({ length: 12 }, (_, i) => ({
-        id: generateDeterministicId("primary", i),
-        d: generateAestheticPath(i, position, "primary", time),
-        opacity: 0.15 + i * 0.02,
-        width: 4 + i * 0.3,
-      })),
-    [position, time]
-  );
-
-  const secondaryPaths: PathData[] = useMemo(
-    () =>
-      Array.from({ length: 15 }, (_, i) => ({
-        id: generateDeterministicId("secondary", i),
-        d: generateAestheticPath(i, position, "secondary", time),
-        opacity: 0.12 + i * 0.015,
-        width: 3 + i * 0.25,
-      })),
-    [position, time]
-  );
-
-  const accentPaths: PathData[] = useMemo(
-    () =>
-      Array.from({ length: 10 }, (_, i) => ({
-        id: generateDeterministicId("accent", i),
-        d: generateAestheticPath(i, position, "accent", time),
-        opacity: 0.08 + i * 0.012,
-        width: 2 + i * 0.2,
-      })),
-    [position, time]
-  );
 
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden">
-      <style dangerouslySetInnerHTML={{
-        __html: `
-          @keyframes float-primary {
-            0%, 100% { transform: translateY(0px) scale(1); }
-            50% { transform: translateY(-8px) scale(1.02); }
-          }
-          @keyframes float-secondary {
-            0%, 100% { transform: translateY(0px) scale(1); }
-            50% { transform: translateY(-5px) scale(1.01); }
-          }
-          @keyframes float-accent {
-            0%, 100% { transform: translateY(0px) scale(1); }
-            50% { transform: translateY(-3px) scale(1.005); }
-          }
-          @keyframes gradient-wave {
-            0% { 
-              x1: -50%; x2: 50%; 
-            }
-            50% { 
-              x1: 25%; x2: 125%; 
-            }
-            100% { 
-              x1: -50%; x2: 50%; 
-            }
-          }
-          @keyframes color-shift-start {
-            0% { stop-color: rgba(147, 51, 234, 0.5); }
-            25% { stop-color: rgba(59, 130, 246, 0.5); }
-            50% { stop-color: rgba(16, 185, 129, 0.5); }
-            75% { stop-color: rgba(236, 72, 153, 0.5); }
-            100% { stop-color: rgba(147, 51, 234, 0.5); }
-          }
-          @keyframes color-shift-mid {
-            0% { stop-color: rgba(16, 185, 129, 0.5); }
-            25% { stop-color: rgba(236, 72, 153, 0.5); }
-            50% { stop-color: rgba(147, 51, 234, 0.5); }
-            75% { stop-color: rgba(59, 130, 246, 0.5); }
-            100% { stop-color: rgba(16, 185, 129, 0.5); }
-          }
-          @keyframes color-shift-end {
-            0% { stop-color: rgba(236, 72, 153, 0.5); }
-            25% { stop-color: rgba(147, 51, 234, 0.5); }
-            50% { stop-color: rgba(59, 130, 246, 0.5); }
-            75% { stop-color: rgba(16, 185, 129, 0.5); }
-            100% { stop-color: rgba(236, 72, 153, 0.5); }
-          }
-          .primary-waves {
-            animation: float-primary 12s ease-in-out infinite;
-          }
-          .secondary-waves {
-            animation: float-secondary 9s ease-in-out infinite;
-          }
-          .accent-waves {
-            animation: float-accent 6s ease-in-out infinite;
-          }
-          .animated-gradient {
-            animation: gradient-wave 8s ease-in-out infinite;
-          }
-          .animated-stop-start {
-            animation: color-shift-start 12s ease-in-out infinite;
-          }
-          .animated-stop-mid {
-            animation: color-shift-mid 12s ease-in-out infinite;
-          }
-          .animated-stop-end {
-            animation: color-shift-end 12s ease-in-out infinite;
-          }
-        `
-      }} />
-      
-      <svg
-        className="w-full h-full text-slate-950/40 dark:text-white/40"
-        viewBox="-2400 -800 4800 1600"
-        fill="none"
-        preserveAspectRatio="xMidYMid slice"
-      >
-        <title>Background Paths</title>
-        <defs>
-          <linearGradient
-            id="animatedGradient1"
-            className="animated-gradient"
-            x1="-50%"
-            y1="0%"
-            x2="50%"
-            y2="0%"
-          >
-            <stop offset="0%" className="animated-stop-start" stopColor="rgba(147, 51, 234, 0.5)" />
-            <stop offset="50%" className="animated-stop-mid" stopColor="rgba(16, 185, 129, 0.5)" />
-            <stop offset="100%" className="animated-stop-end" stopColor="rgba(236, 72, 153, 0.5)" />
-          </linearGradient>
-          <linearGradient
-            id="animatedGradient2"
-            className="animated-gradient"
-            x1="-50%"
-            y1="0%"
-            x2="50%"
-            y2="0%"
-          >
-            <stop offset="0%" className="animated-stop-end" stopColor="rgba(236, 72, 153, 0.5)" />
-            <stop offset="50%" className="animated-stop-start" stopColor="rgba(147, 51, 234, 0.5)" />
-            <stop offset="100%" className="animated-stop-mid" stopColor="rgba(16, 185, 129, 0.5)" />
-          </linearGradient>
-          <linearGradient
-            id="animatedGradient3"
-            className="animated-gradient"
-            x1="-50%"
-            y1="0%"
-            x2="50%"
-            y2="0%"
-          >
-            <stop offset="0%" className="animated-stop-mid" stopColor="rgba(16, 185, 129, 0.5)" />
-            <stop offset="50%" className="animated-stop-end" stopColor="rgba(236, 72, 153, 0.5)" />
-            <stop offset="100%" className="animated-stop-start" stopColor="rgba(147, 51, 234, 0.5)" />
-          </linearGradient>
-        </defs>
-
-        <g className="primary-waves">
-          {primaryPaths.map((path) => (
-            <path
-              key={path.id}
-              d={path.d}
-              stroke="url(#animatedGradient1)"
-              strokeWidth={path.width}
-              strokeLinecap="round"
-              style={{ opacity: path.opacity }}
-              fill="none"
-            />
-          ))}
-        </g>
-
-        <g className="secondary-waves" style={{ opacity: 0.8 }}>
-          {secondaryPaths.map((path) => (
-            <path
-              key={path.id}
-              d={path.d}
-              stroke="url(#animatedGradient2)"
-              strokeWidth={path.width}
-              strokeLinecap="round"
-              style={{ opacity: path.opacity }}
-              fill="none"
-            />
-          ))}
-        </g>
-
-        <g className="accent-waves" style={{ opacity: 0.6 }}>
-          {accentPaths.map((path) => (
-            <path
-              key={path.id}
-              d={path.d}
-              stroke="url(#animatedGradient3)"
-              strokeWidth={path.width}
-              strokeLinecap="round"
-              style={{ opacity: path.opacity }}
-              fill="none"
-            />
-          ))}
-        </g>
-      </svg>
-    </div>
+    <canvas
+      ref={canvasRef}
+      className="absolute inset-0 w-full h-full pointer-events-none"
+      style={{ 
+        opacity: 0.8,
+        background: 'transparent'
+      }}
+    />
   );
 });
 
 export default memo(function BackgroundPaths() {
-  return <FloatingPaths position={1} />;
+  return (
+    <div className="absolute inset-0 pointer-events-none overflow-hidden">
+      <CanvasWaves />
+    </div>
+  );
 });
